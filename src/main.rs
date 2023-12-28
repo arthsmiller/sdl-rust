@@ -11,23 +11,15 @@ mod engine {
     use sdl2::pixels::Color;
     use sdl2::rect::Rect;
     use sdl2::render::WindowCanvas;
-    use sdl2::TimerSubsystem;
-    use crate::random::{get_random_color, get_random_position};
+    use sdl2::{EventPump, Sdl, TimerSubsystem, VideoSubsystem};
+    use crate::random::get_random_int;
 
     use super::sprite::*;
 
     pub fn run () {
-        let sdl_context = sdl2::init().unwrap();
-        let video_subsystem = sdl_context.video().unwrap();
-        let mut window = video_subsystem.window("hi", 800, 600)
-            .position_centered()
-            .build()
-            .unwrap();
-        let mut canvas = window.into_canvas().build().unwrap();
-        let mut event_pump = sdl_context.event_pump().unwrap();
-        let timer_subsystem: TimerSubsystem = sdl_context.timer().unwrap();
+        let mut sdl_components = SdlComponents::init();
 
-        let mut past = TimerSubsystem::ticks64(&timer_subsystem);
+        let mut past = TimerSubsystem::ticks64(&sdl_components.timer_subsystem);
         let mut now;
         let mut past_fps = past;
         let mut fps = 0;
@@ -35,18 +27,18 @@ mod engine {
 
         let mut key_downs = KeyDowns::new();
 
-        let (mut window_width,mut window_height) = canvas.output_size().unwrap();
+        let (mut window_width,mut window_height) = sdl_components.canvas.output_size().unwrap();
         let window_width: i32 = window_width as i32;
         let window_height: i32 = window_height as i32;
 
         let sprites: &mut Vec<Sprite> = &mut Vec::new();
-        add_sprite(sprites, SpriteType::PLAYER, Some(window_width), Some(window_height));
-        add_sprite(sprites, SpriteType::ENEMY, Some(window_width), Some(window_height));
+        add_sprite(sprites, SpriteType::PLAYER, &mut sdl_components);
+        add_sprite(sprites, SpriteType::ENEMY, &mut sdl_components);
 
         'running: loop {
             let mut time_elapsed = 0;
 
-            for event in event_pump.poll_iter() {
+            for event in sdl_components.event_pump.poll_iter() {
                 match event {
                     Event::Quit {..} |
                     Event::KeyDown { keycode: Some(Keycode::Escape), .. } => break 'running,
@@ -56,69 +48,53 @@ mod engine {
                 handle_key_events(event, &mut key_downs);
             }
 
-            let (mut window_width,mut window_height) = canvas.output_size().unwrap();
+            let (mut window_width,mut window_height) = sdl_components.canvas.output_size().unwrap();
             let window_width: i32 = window_width as i32;
             let window_height: i32 = window_height as i32;
 
             update_sprites(sprites, &mut key_downs, window_width, window_height);
 
-            canvas.set_draw_color(Color::RGB(255, 255, 255));
-            canvas.clear();
+            sdl_components.canvas.set_draw_color(Color::RGB(255, 255, 255));
+            sdl_components.canvas.clear();
 
-            draw(&mut canvas, sprites);
+            draw(&mut sdl_components.canvas, sprites);
 
-            now = TimerSubsystem::ticks64(&timer_subsystem);
+            now = TimerSubsystem::ticks64(&sdl_components.timer_subsystem);
             time_elapsed = now - past;
-
-            if now - past_fps >= 1000 {
-                past_fps = now;
-                // todo fps counter
-                fps = 0;
-            }
 
             if time_elapsed >= (1000 / 60) {
                 past = now;
 
                 if frames_skipped +1 >= 0 {
-                    canvas.present();
-
+                    sdl_components.canvas.present();
                     fps += 1;
                     frames_skipped = 0;
                 }
+            }
+
+            if now - past_fps >= 1000 {
+                past_fps = now;
+                let fps_string = fps.to_string();
+                let _ = sdl_components.canvas.window_mut().set_title(fps_string.as_str());
+                fps = 0;
             }
 
             std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
         }
     }
 
-    pub fn add_sprite (
-        sprites: &mut Vec<Sprite>,
-        sprite_type: SpriteType,
-        x: Option<i32>,
-        y: Option<i32>,
-        red: Option<u8>,
-        green: Option<u8>,
-        blue: Option<u8>,
-    ) {
-        let (x_pos, y_pos) = (x.unwrap_or())
-
-        if x > 0 || y > 0  {
-            let (x_pos, y_pos) = get_random_position(x, y);
-        }
-        else {
-            let x_pos = x;
-            let y_pos = y;
-        }
-
-        let color_red = if red == 0 {  }
+    pub fn add_sprite (sprites: &mut Vec<Sprite>, sprite_type: SpriteType, sdl_components: &mut SdlComponents) {
+        let (mut window_width,mut window_height) = sdl_components.canvas.output_size().unwrap();
+        let window_width: i32 = window_width as i32;
+        let window_height: i32 = window_height as i32;
 
         sprites.push(Sprite{
-            x: x_pos,
-            y: y_pos,
+            x: get_random_int(0, window_width),
+            y: get_random_int(0, window_height),
             sprite_type,
-            red: get_random_color(),
-            green: get_random_color(),
-            blue: get_random_color()
+            red: get_random_int(0, 255) as u8,
+            green: get_random_int(0, 255) as u8,
+            blue: get_random_int(0, 255) as u8,
         });
     }
 
@@ -166,6 +142,36 @@ mod engine {
         }
         else if sprite.y < 0 {
             sprite.y = window_height
+        }
+    }
+
+    struct SdlComponents {
+        sdl_context: Sdl,
+        video_subsystem: VideoSubsystem,
+        canvas: WindowCanvas,
+        event_pump: EventPump,
+        timer_subsystem: TimerSubsystem
+    }
+
+    impl SdlComponents {
+        fn init() -> SdlComponents {
+            let sdl_context = sdl2::init().unwrap();
+            let video_subsystem = sdl_context.video().unwrap();
+            let window = video_subsystem.window("hi", 800, 600)
+                .position_centered()
+                .build()
+                .unwrap();
+            let mut canvas = window.into_canvas().build().unwrap();
+            let event_pump = sdl_context.event_pump().unwrap();
+            let timer_subsystem: TimerSubsystem = sdl_context.timer().unwrap();
+
+            SdlComponents{
+                sdl_context,
+                video_subsystem,
+                canvas,
+                event_pump,
+                timer_subsystem
+            }
         }
     }
 
@@ -224,15 +230,5 @@ pub mod random {
     pub fn get_random_int (min: i32, max: i32) -> i32 {
         let mut rng = rand::thread_rng();
         rng.gen_range(min..max)
-    }
-
-    pub fn get_random_position(x: i32, y: i32) -> (i32, i32) {
-        let mut rng = rand::thread_rng();
-        (rng.gen_range(0..x), rng.gen_range(0..y))
-    }
-
-    pub fn get_random_color() -> u8 {
-        let mut rng = rand::thread_rng();
-        rng.gen_range(0..255)
     }
 }
