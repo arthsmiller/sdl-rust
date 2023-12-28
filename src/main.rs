@@ -66,7 +66,7 @@ mod engine {
 
             if now - past_fps >= 1000 {
                 past_fps = now;
-                SdlComponents::update_window_title(&mut sdl_components, fps.to_string().as_str());
+                sdl_components.update_window_title(fps.to_string().as_str());
                 fps = 0;
             }
 
