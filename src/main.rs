@@ -27,10 +27,6 @@ mod engine {
 
         let mut key_downs = KeyDowns::new();
 
-        let (mut window_width,mut window_height) = sdl_components.canvas.output_size().unwrap();
-        let window_width: i32 = window_width as i32;
-        let window_height: i32 = window_height as i32;
-
         let sprites: &mut Vec<Sprite> = &mut Vec::new();
         add_sprite(sprites, SpriteType::PLAYER, &mut sdl_components);
         add_sprite(sprites, SpriteType::ENEMY, &mut sdl_components);
@@ -48,11 +44,7 @@ mod engine {
                 handle_key_events(event, &mut key_downs);
             }
 
-            let (mut window_width,mut window_height) = sdl_components.canvas.output_size().unwrap();
-            let window_width: i32 = window_width as i32;
-            let window_height: i32 = window_height as i32;
-
-            update_sprites(sprites, &mut key_downs, window_width, window_height);
+            update_sprites(sprites, &mut key_downs, &mut sdl_components);
 
             sdl_components.canvas.set_draw_color(Color::RGB(255, 255, 255));
             sdl_components.canvas.clear();
@@ -65,7 +57,7 @@ mod engine {
             if time_elapsed >= (1000 / 60) {
                 past = now;
 
-                if frames_skipped +1 >= 0 {
+                if frames_skipped + 1 >= 0 {
                     sdl_components.canvas.present();
                     fps += 1;
                     frames_skipped = 0;
@@ -74,8 +66,7 @@ mod engine {
 
             if now - past_fps >= 1000 {
                 past_fps = now;
-                let fps_string = fps.to_string();
-                let _ = sdl_components.canvas.window_mut().set_title(fps_string.as_str());
+                SdlComponents::update_window_title(&mut sdl_components, fps.to_string().as_str());
                 fps = 0;
             }
 
@@ -101,9 +92,7 @@ mod engine {
     pub fn draw (canvas: &mut WindowCanvas, sprites: &Vec<Sprite>) {
         let rects: &mut Vec<Rect> = &mut Vec::new();
         for sprite in sprites {
-            let mut rect = Rect::new(0, 0, 20, 20);
-            rect.x = sprite.x;
-            rect.y = sprite.y;
+            let rect = Rect::new(sprite.x, sprite.y, 20, 20);
 
             rects.push(rect);
 
@@ -112,12 +101,11 @@ mod engine {
         }
     }
 
-    pub fn update_sprites (
-        sprites: &mut Vec<Sprite>,
-        key_downs: &mut KeyDowns,
-        window_width: i32,
-        window_height: i32,
-    ){
+    pub fn update_sprites (sprites: &mut Vec<Sprite>, key_downs: &mut KeyDowns, sdl_components: &mut SdlComponents) {
+        let (mut window_width,mut window_height) = sdl_components.canvas.output_size().unwrap();
+        let window_width: i32 = window_width as i32;
+        let window_height: i32 = window_height as i32;
+
         for sprite in sprites {
             return_sprite_to_canvas(sprite, window_width, window_height);
 
@@ -154,7 +142,7 @@ mod engine {
     }
 
     impl SdlComponents {
-        fn init() -> SdlComponents {
+        fn init () -> SdlComponents {
             let sdl_context = sdl2::init().unwrap();
             let video_subsystem = sdl_context.video().unwrap();
             let window = video_subsystem.window("hi", 800, 600)
@@ -172,6 +160,10 @@ mod engine {
                 event_pump,
                 timer_subsystem
             }
+        }
+
+        fn update_window_title (&mut self, title: &str) {
+            self.canvas.window_mut().set_title(title).expect("could not set title");
         }
     }
 
