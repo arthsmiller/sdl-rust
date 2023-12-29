@@ -12,6 +12,7 @@ pub mod engine {
     use sdl2::rect::Rect;
     use sdl2::render::WindowCanvas;
     use sdl2::{EventPump, Sdl, TimerSubsystem, VideoSubsystem};
+    use sdl2::mouse::MouseButton;
 
     use crate::random::random_int;
     use super::sprite::*;
@@ -19,17 +20,17 @@ pub mod engine {
     pub fn run () {
         let mut sdl_components = SdlComponents::init();
 
-        let mut past = TimerSubsystem::ticks64(&sdl_components.timer_subsystem);
+        let mut past = sdl_components.timer_subsystem.ticks64();
         let mut now;
         let mut past_fps = past;
         let mut fps = 0;
         let mut frames_skipped = 0;
 
-        let mut key_downs = KeyDowns::new();
+        let mut input = Input::new();
 
-        let num_enemies = 10;
         let sprites: &mut Vec<Sprite> = &mut Vec::new();
         add_sprite(sprites, SpriteType::PLAYER, &mut sdl_components);
+        let num_enemies = 10;
         for _ in 1..=num_enemies {
             add_sprite(sprites, SpriteType::ENEMY, &mut sdl_components);
         }
@@ -44,17 +45,18 @@ pub mod engine {
                     _ => {}
                 }
 
-                handle_key_events(event, &mut key_downs);
+                handle_key_events(event.clone(), &mut input);
+                handle_mouse_events(event, &mut input);
             }
 
-            update_sprites(sprites, &mut key_downs, &mut sdl_components);
+            update_sprites(sprites, &mut input, &mut sdl_components);
 
             sdl_components.canvas.set_draw_color(Color::RGB(255, 255, 255));
             sdl_components.canvas.clear();
 
             draw(&mut sdl_components.canvas, sprites);
 
-            now = TimerSubsystem::ticks64(&sdl_components.timer_subsystem);
+            now = sdl_components.timer_subsystem.ticks64();
             time_elapsed = now - past;
 
             if time_elapsed >= (1000 / 60) {
@@ -69,7 +71,7 @@ pub mod engine {
 
             if now - past_fps >= 1000 {
                 past_fps = now;
-                sdl_components.update_window_title(fps.to_string().as_str());
+                sdl_components.update_window_title(["fps: ", fps.to_string().as_str()].join("").as_str());
                 fps = 0;
             }
 
@@ -105,36 +107,32 @@ pub mod engine {
         }
     }
 
-    pub fn update_sprites (sprites: &mut Vec<Sprite>, key_downs: &mut KeyDowns, sdl_components: &mut SdlComponents) {
+    pub fn update_sprites (sprites: &mut Vec<Sprite>, input: &mut Input, sdl_components: &mut SdlComponents) {
         let (mut window_width,mut window_height) = sdl_components.canvas.output_size().unwrap();
         let window_width: i32 = window_width as i32;
         let window_height: i32 = window_height as i32;
 
-        for sprite in sprites {
-            return_sprite_to_canvas(sprite, window_width, window_height);
+        let mut i = 0;
+        while i < sprites.len() {
+            let sprite = &mut sprites[i];
+            sprite.return_sprite_to_canvas(window_width, window_height);
             sprite.auto_move(sdl_components);
-
+            
             if sprite.sprite_type == SpriteType::PLAYER {
-                if key_downs.is_key_down(Keycode::Up) { sprite.y -= 10 }
-                if key_downs.is_key_down(Keycode::Down) { sprite.y += 10 }
-                if key_downs.is_key_down(Keycode::Left) { sprite.x -= 10 }
-                if key_downs.is_key_down(Keycode::Right) { sprite.x += 10 }
+                if input.is_key_down(Keycode::Up) { sprite.y -= 10 }
+                if input.is_key_down(Keycode::Down) { sprite.y += 10 }
+                if input.is_key_down(Keycode::Left) { sprite.x -= 10 }
+                if input.is_key_down(Keycode::Right) { sprite.x += 10 }
             }
-        }
-    }
 
-    pub fn return_sprite_to_canvas(sprite: &mut Sprite, window_width: i32, window_height: i32) {
-        if sprite.x > window_width {
-            sprite.x = 0
-        }
-        else if sprite.x < 0 {
-            sprite.x = window_width
-        }
-        else if sprite.y > window_height {
-            sprite.y = 0
-        }
-        else if sprite.y < 0 {
-            sprite.y = window_height
+            if input.is_mouse_btn_down(MouseButton::Left) &&
+               input.is_mouse_over_sprite(&sprites[i]) == true &&
+               sprite.sprite_type == SpriteType::ENEMY
+            {
+                Sprite::destroy_sprite(sprites, i);
+            } else {
+                i += 1;
+            }
         }
     }
 
@@ -168,47 +166,112 @@ pub mod engine {
         }
 
         fn update_window_title (&mut self, title: &str) {
-            self.canvas.window_mut().set_title(["fps: ", title].join("").as_str()).expect("could not set title");
+            self.canvas.window_mut().set_title(title).expect("could not set title");
         }
     }
 
-    struct KeyDowns {
+    struct Input {
         keys: HashMap<Keycode, bool>,
+        mouse: HashMap<MouseButton, bool>,
+        mouse_current_pos_x: i32,
+        mouse_current_pos_y: i32,
+        mouse_last_click_pos_x: i32,
+        mouse_last_click_pos_y: i32,
     }
 
-    impl KeyDowns {
+    impl Input {
         fn new() -> Self {
-            KeyDowns { keys: HashMap::new() }
+            Input {
+                keys: HashMap::new(),
+                mouse: HashMap::new(),
+                mouse_current_pos_x: 0,
+                mouse_current_pos_y: 0,
+                mouse_last_click_pos_x: 0,
+                mouse_last_click_pos_y: 0
+            }
         }
 
         fn set_key(&mut self, key: Keycode, value: bool) {
             self.keys.insert(key, value);
         }
 
+        fn set_mouse_btn(&mut self, mouse: MouseButton, value: bool) {
+            self.mouse.insert(mouse, value);
+        }
+
+        fn set_current_mouse_pos(&mut self, x: i32, y: i32) {
+            self.mouse_current_pos_x = x;
+            self.mouse_current_pos_y = y;
+        }
+
+        fn set_last_click_mouse_pos(&mut self, x: i32, y: i32) {
+            self.mouse_last_click_pos_x = x;
+            self.mouse_last_click_pos_y = y;
+        }
+
         fn is_key_down(&self, key: Keycode) -> bool {
             *self.keys.get(&key).unwrap_or(&false)
         }
+
+        fn is_mouse_btn_down(&self, mouse_btn: MouseButton) -> bool {
+            *self.mouse.get(&mouse_btn).unwrap_or(&false)
+        }
+
+        fn current_mouse_pos(&mut self) -> (i32, i32) {
+            (self.mouse_current_pos_x, self.mouse_current_pos_y)
+        }
+
+        fn last_click_mouse_pos(&mut self) -> (i32, i32) {
+            (self.mouse_last_click_pos_x, self.mouse_last_click_pos_y)
+        }
+
+        fn is_mouse_over_sprite (&mut self, sprite: &Sprite) -> bool {
+            if self.mouse_current_pos_x >= sprite.x && self.mouse_current_pos_x <= sprite.x + 20 &&
+               self.mouse_current_pos_y >= sprite.y && self.mouse_current_pos_y <= sprite.y + 20
+            {
+                return true;
+            }
+
+            false
+        }
     }
 
-    fn handle_key_events(event: Event, key_downs: &mut KeyDowns) {
+    fn handle_key_events(event: Event, input: &mut Input) {
         match event {
             Event::KeyDown { keycode: Some(keycode), .. } => {
-                key_downs.set_key(keycode, true);
+                input.set_key(keycode, true);
             },
             Event::KeyUp { keycode: Some(keycode), .. } => {
-                key_downs.set_key(keycode, false);
+                input.set_key(keycode, false);
             },
+            _ => {}
+        }
+    }
+
+    fn handle_mouse_events(event: Event, input: &mut Input) {
+        match event {
+            Event::MouseButtonDown { mouse_btn,x, y, .. } => {
+                input.set_mouse_btn(mouse_btn, true);
+            },
+            Event::MouseButtonUp { mouse_btn, x, y, .. } => {
+                input.set_mouse_btn(mouse_btn, false);
+                input.set_last_click_mouse_pos(x, y);
+            },
+            Event::MouseMotion { x, y, .. } => {
+                input.mouse_current_pos_x = x;
+                input.mouse_current_pos_y = y;
+            }
             _ => {}
         }
     }
 }
 
 pub mod sprite {
-    use sdl2::TimerSubsystem;
     use crate::random::random_int;
     use super::engine::SdlComponents;
 
-    pub struct Sprite {
+    #[derive(PartialEq)]
+pub struct Sprite {
         pub x: i32,
         pub y: i32,
         pub red: u8,
@@ -260,7 +323,7 @@ pub mod sprite {
         pub fn auto_move (&mut self, sdl_components: &mut SdlComponents) {
             if self.sprite_type == SpriteType::PLAYER { return; }
 
-            let now = TimerSubsystem::ticks64(&sdl_components.timer_subsystem);
+            let now = sdl_components.timer_subsystem.ticks64();
 
             if self.action_end_timestamp == 0 || self.action_end_timestamp <= now as i32 {
                 self.current_direction = Direction::from_int(random_int(0, 8)).unwrap_or(Direction::STOP);
@@ -279,6 +342,25 @@ pub mod sprite {
                     Direction::DOWNLEFT => {self.y += 10; self.x -= 10}
                 };
             }
+        }
+
+        pub fn return_sprite_to_canvas(&mut self, window_width: i32, window_height: i32) {
+            if self.x > window_width {
+                self.x = 0
+            }
+            else if self.x < 0 {
+                self.x = window_width
+            }
+            else if self.y > window_height {
+                self.y = 0
+            }
+            else if self.y < 0 {
+                self.y = window_height
+            }
+        }
+
+        pub fn destroy_sprite(sprites: &mut Vec<Sprite>, index: usize) {
+            sprites.remove(index);
         }
     }
 }
