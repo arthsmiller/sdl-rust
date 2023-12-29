@@ -16,6 +16,7 @@ pub mod engine {
 
     use crate::random::random_int;
     use super::sprite::*;
+    use super::api::*;
 
     pub fn run () {
         let mut sdl_components = SdlComponents::init();
@@ -34,6 +35,8 @@ pub mod engine {
         for _ in 1..=num_enemies {
             add_sprite(sprites, SpriteType::ENEMY, &mut sdl_components);
         }
+
+        request();
 
         'running: loop {
             let mut time_elapsed = 0;
@@ -77,6 +80,7 @@ pub mod engine {
 
             std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
         }
+
     }
 
     pub fn add_sprite (sprites: &mut Vec<Sprite>, sprite_type: SpriteType, sdl_components: &mut SdlComponents) {
@@ -371,5 +375,31 @@ pub mod random {
     pub fn random_int(min: i32, max: i32) -> i32 {
         let mut rng = rand::thread_rng();
         rng.gen_range(min..max)
+    }
+}
+
+pub mod api {
+    use reqwest::Error;
+
+    #[tokio::main]
+    pub async fn request() -> Result<(), Error> {
+        let client = reqwest::Client::new();
+        let uri = "https://overpass-api.de/api/interpreter";
+        let body = "node(43.731, 7.418, 43.732, 7.419); out body;";
+
+        let response = client
+            .post(uri)
+            .body(body)
+            .send()
+            .await?;
+
+        if response.status().is_success() {
+            let response_text = response.text().await?;
+            println!("Received XML Response: {}", response_text);
+        } else {
+            println!("Failed to receive successful response");
+        }
+
+        Ok(())
     }
 }
