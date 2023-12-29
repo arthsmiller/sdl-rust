@@ -126,7 +126,7 @@ pub mod engine {
             }
 
             if input.is_mouse_btn_down(MouseButton::Left) &&
-               input.is_mouse_over_sprite(&sprites[i]) == true &&
+               input.is_mouse_over_sprite(sprite) == true &&
                sprite.sprite_type == SpriteType::ENEMY
             {
                 Sprite::destroy_sprite(sprites, i);
