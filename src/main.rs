@@ -168,7 +168,7 @@ pub mod engine {
         }
 
         fn update_window_title (&mut self, title: &str) {
-            self.canvas.window_mut().set_title(title).expect("could not set title");
+            self.canvas.window_mut().set_title(["fps: ", title].join("").as_str()).expect("could not set title");
         }
     }
 
