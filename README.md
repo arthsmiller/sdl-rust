@@ -6,4 +6,4 @@
 
 ## Linus
 1. install dev stuff for gcc and cmake
-2. install sdl packages ```bash ```
+2. install sdl packages ```bash sdl2 sdl2_gfx sdl2_ttf```
