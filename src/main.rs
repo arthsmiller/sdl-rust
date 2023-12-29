@@ -385,7 +385,7 @@ pub mod api {
     pub async fn request() -> Result<(), Error> {
         let client = reqwest::Client::new();
         let uri = "https://overpass-api.de/api/interpreter";
-        let body = "node(43.731, 7.418, 43.732, 7.419); out body;";
+        let body = "Node(43.731, 7.418, 43.732, 7.419); out body;";
 
         let response = client
             .post(uri)
@@ -401,5 +401,56 @@ pub mod api {
         }
 
         Ok(())
+    }
+}
+
+pub mod osm {
+    pub struct Osm {
+        nodes: Node,
+        ways: Way,
+        relations: Relation,
+    }
+
+    impl Osm {
+        pub fn new(nodes: Node, ways: Way, relations: Relation) -> Self {
+            Self { nodes, ways, relations }
+        }
+    }
+
+    pub struct Node {
+        id: i64,
+        lat: f32,
+        lon: f32,
+        tags: Vec<String, String>,
+    }
+
+    impl Node {
+        pub fn new(id: i64, lat: f32, lon: f32, tags: Vec<String, String>) -> Self {
+            Self { id, lat, lon, tags }
+        }
+    }
+
+    pub struct Way {
+        id: i32,
+        refs: Vec<i64>,
+        tags: Vec<String, String>,
+    }
+
+    impl Way {
+        pub fn new(id: i32, refs: Vec<i64>, tags: Vec<String, String>) -> Self {
+            Self { id, refs, tags }
+        }
+    }
+
+    pub struct Relation {
+        id: i32,
+        members: Vec<i64, String>,
+        tags: Vec<String, String>,
+    }
+
+    impl Relation {
+        pub fn new(id: i32, members: Vec<i64, String>, tags: Vec<String, String>) -> Self {
+            Self { id, members, tags }
+        }
     }
 }
