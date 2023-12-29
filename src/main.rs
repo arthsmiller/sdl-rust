@@ -13,7 +13,7 @@ pub mod engine {
     use sdl2::render::WindowCanvas;
     use sdl2::{EventPump, Sdl, TimerSubsystem, VideoSubsystem};
 
-    use crate::random::get_random_int;
+    use crate::random::random_int;
     use super::sprite::*;
 
     pub fn run () {
@@ -83,12 +83,12 @@ pub mod engine {
         let window_height: i32 = window_height as i32;
 
         sprites.push(Sprite{
-            x: get_random_int(0, window_width),
-            y: get_random_int(0, window_height),
+            x: random_int(0, window_width),
+            y: random_int(0, window_height),
             sprite_type: sprite_type,
-            red: get_random_int(0, 255) as u8,
-            green: get_random_int(0, 255) as u8,
-            blue: get_random_int(0, 255) as u8,
+            red: random_int(0, 255) as u8,
+            green: random_int(0, 255) as u8,
+            blue: random_int(0, 255) as u8,
             action_end_timestamp: 0,
             current_direction: Direction::STOP,
         });
@@ -112,7 +112,7 @@ pub mod engine {
 
         for sprite in sprites {
             return_sprite_to_canvas(sprite, window_width, window_height);
-            Sprite::auto_move(sprite, sdl_components);
+            sprite.auto_move(sdl_components);
 
             if sprite.sprite_type == SpriteType::PLAYER {
                 if key_downs.is_key_down(Keycode::Up) { sprite.y -= 10 }
@@ -205,7 +205,7 @@ pub mod engine {
 
 pub mod sprite {
     use sdl2::TimerSubsystem;
-    use crate::random::get_random_int;
+    use crate::random::random_int;
     use super::engine::SdlComponents;
 
     pub struct Sprite {
@@ -263,8 +263,8 @@ pub mod sprite {
             let now = TimerSubsystem::ticks64(&sdl_components.timer_subsystem);
 
             if self.action_end_timestamp == 0 || self.action_end_timestamp <= now as i32 {
-                self.current_direction = Direction::from_int(get_random_int(0, 8)).unwrap_or(Direction::STOP);
-                self.action_end_timestamp = get_random_int(0, 3000) + now as i32;
+                self.current_direction = Direction::from_int(random_int(0, 8)).unwrap_or(Direction::STOP);
+                self.action_end_timestamp = random_int(0, 3000) + now as i32;
             }
             else {
                 match self.current_direction {
@@ -286,7 +286,7 @@ pub mod sprite {
 pub mod random {
     use rand::Rng;
 
-    pub fn get_random_int (min: i32, max: i32) -> i32 {
+    pub fn random_int(min: i32, max: i32) -> i32 {
         let mut rng = rand::thread_rng();
         rng.gen_range(min..max)
     }
