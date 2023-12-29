@@ -2,7 +2,7 @@ pub fn main() {
     engine::run();
 }
 
-mod engine {
+pub mod engine {
     use std::collections::HashMap;
     use std::time::Duration;
 
@@ -12,8 +12,8 @@ mod engine {
     use sdl2::rect::Rect;
     use sdl2::render::WindowCanvas;
     use sdl2::{EventPump, Sdl, TimerSubsystem, VideoSubsystem};
-    use crate::random::get_random_int;
 
+    use crate::random::get_random_int;
     use super::sprite::*;
 
     pub fn run () {
@@ -27,9 +27,12 @@ mod engine {
 
         let mut key_downs = KeyDowns::new();
 
+        let num_enemies = 10;
         let sprites: &mut Vec<Sprite> = &mut Vec::new();
         add_sprite(sprites, SpriteType::PLAYER, &mut sdl_components);
-        add_sprite(sprites, SpriteType::ENEMY, &mut sdl_components);
+        for _ in 1..=num_enemies {
+            add_sprite(sprites, SpriteType::ENEMY, &mut sdl_components);
+        }
 
         'running: loop {
             let mut time_elapsed = 0;
@@ -82,10 +85,12 @@ mod engine {
         sprites.push(Sprite{
             x: get_random_int(0, window_width),
             y: get_random_int(0, window_height),
-            sprite_type,
+            sprite_type: sprite_type,
             red: get_random_int(0, 255) as u8,
             green: get_random_int(0, 255) as u8,
             blue: get_random_int(0, 255) as u8,
+            action_end_timestamp: 0,
+            current_direction: Direction::STOP,
         });
     }
 
@@ -93,7 +98,6 @@ mod engine {
         let rects: &mut Vec<Rect> = &mut Vec::new();
         for sprite in sprites {
             let rect = Rect::new(sprite.x, sprite.y, 20, 20);
-
             rects.push(rect);
 
             canvas.set_draw_color(Color::RGB(sprite.red, sprite.green, sprite.blue));
@@ -108,6 +112,7 @@ mod engine {
 
         for sprite in sprites {
             return_sprite_to_canvas(sprite, window_width, window_height);
+            Sprite::auto_move(sprite, sdl_components);
 
             if sprite.sprite_type == SpriteType::PLAYER {
                 if key_downs.is_key_down(Keycode::Up) { sprite.y -= 10 }
@@ -133,12 +138,12 @@ mod engine {
         }
     }
 
-    struct SdlComponents {
+    pub struct SdlComponents {
         sdl_context: Sdl,
         video_subsystem: VideoSubsystem,
         canvas: WindowCanvas,
         event_pump: EventPump,
-        timer_subsystem: TimerSubsystem
+        pub timer_subsystem: TimerSubsystem
     }
 
     impl SdlComponents {
@@ -199,6 +204,10 @@ mod engine {
 }
 
 pub mod sprite {
+    use sdl2::TimerSubsystem;
+    use crate::random::get_random_int;
+    use super::engine::SdlComponents;
+
     pub struct Sprite {
         pub x: i32,
         pub y: i32,
@@ -206,6 +215,8 @@ pub mod sprite {
         pub green: u8,
         pub blue: u8,
         pub sprite_type: SpriteType,
+        pub current_direction: Direction,
+        pub action_end_timestamp: i32,
     }
 
     #[derive(PartialEq)]
@@ -213,6 +224,62 @@ pub mod sprite {
         PLAYER,
         ENEMY,
         DEFAULT,
+    }
+
+    #[derive(PartialEq, Eq)]
+    pub enum Direction {
+        STOP,
+        UP,
+        RIGHT,
+        DOWN,
+        LEFT,
+        UPRIGHT,
+        DOWNRIGHT,
+        DOWNLEFT,
+        UPLEFT,
+    }
+
+    impl Direction {
+        pub fn from_int(index: i32) -> Option<Direction> {
+            match index {
+                0 => Some(Direction::STOP),
+                1 => Some(Direction::UP),
+                2 => Some(Direction::RIGHT),
+                3 => Some(Direction::DOWN),
+                4 => Some(Direction::LEFT),
+                5 => Some(Direction::UPRIGHT),
+                6 => Some(Direction::DOWNRIGHT),
+                7 => Some(Direction::UPLEFT),
+                8 => Some(Direction::DOWNLEFT),
+                _ => None,
+            }
+        }
+    }
+
+    impl Sprite {
+        pub fn auto_move (&mut self, sdl_components: &mut SdlComponents) {
+            if self.sprite_type == SpriteType::PLAYER { return; }
+
+            let now = TimerSubsystem::ticks64(&sdl_components.timer_subsystem);
+
+            if self.action_end_timestamp == 0 || self.action_end_timestamp <= now as i32 {
+                self.current_direction = Direction::from_int(get_random_int(0, 8)).unwrap_or(Direction::STOP);
+                self.action_end_timestamp = get_random_int(0, 3000) + now as i32;
+            }
+            else {
+                match self.current_direction {
+                    Direction::STOP => { },
+                    Direction::UP => {self.y += 10}
+                    Direction::RIGHT => {self.x += 10}
+                    Direction::DOWN => {self.y -= 10}
+                    Direction::LEFT => {self.x -= 10}
+                    Direction::UPRIGHT => {self.y += 10; self.x += 10}
+                    Direction::DOWNRIGHT => {self.y -= 10; self.x += 10}
+                    Direction::UPLEFT => {self.y -= 10; self.x -= 10}
+                    Direction::DOWNLEFT => {self.y += 10; self.x -= 10}
+                };
+            }
+        }
     }
 }
 
