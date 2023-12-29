@@ -13,6 +13,7 @@ pub mod engine {
     use sdl2::render::WindowCanvas;
     use sdl2::{EventPump, Sdl, TimerSubsystem, VideoSubsystem};
     use sdl2::mouse::MouseButton;
+    use crate::osm::{Node, Relation, Way};
 
     use crate::random::random_int;
     use super::sprite::*;
@@ -36,7 +37,9 @@ pub mod engine {
             add_sprite(sprites, SpriteType::ENEMY, &mut sdl_components);
         }
 
-        request();
+        // todo delete, debug
+        let body = Relation::build_query(43.731, 7.418, 43.732, 7.419);
+        post("https://overpass-api.de/api/interpreter", body);
 
         'running: loop {
             let mut time_elapsed = 0;
@@ -382,10 +385,11 @@ pub mod api {
     use reqwest::Error;
 
     #[tokio::main]
-    pub async fn request() -> Result<(), Error> {
+    pub async fn post(uri: &str, body: String) -> Result<(), Error> {
         let client = reqwest::Client::new();
-        let uri = "https://overpass-api.de/api/interpreter";
-        let body = "Node(43.731, 7.418, 43.732, 7.419); out body;";
+
+        // https://overpass-api.de/api/interpreter
+        // node(43.731, 7.418, 43.732, 7.419); out body;
 
         let response = client
             .post(uri)
@@ -421,36 +425,48 @@ pub mod osm {
         id: i64,
         lat: f32,
         lon: f32,
-        tags: Vec<String, String>,
+        tags: Vec<(String, String)>,
     }
 
     impl Node {
-        pub fn new(id: i64, lat: f32, lon: f32, tags: Vec<String, String>) -> Self {
+        pub fn new(id: i64, lat: f32, lon: f32, tags: Vec<(String, String)>) -> Self {
             Self { id, lat, lon, tags }
+        }
+
+        pub fn build_query (min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
+            format!("node({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
         }
     }
 
     pub struct Way {
         id: i32,
         refs: Vec<i64>,
-        tags: Vec<String, String>,
+        tags: Vec<(String, String)>,
     }
 
     impl Way {
-        pub fn new(id: i32, refs: Vec<i64>, tags: Vec<String, String>) -> Self {
+        pub fn new(id: i32, refs: Vec<i64>, tags: Vec<(String, String)>) -> Self {
             Self { id, refs, tags }
+        }
+
+        pub fn build_query (min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
+            format!("way({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
         }
     }
 
     pub struct Relation {
         id: i32,
-        members: Vec<i64, String>,
-        tags: Vec<String, String>,
+        members: Vec<(i64, String)>,
+        tags: Vec<(String, String)>,
     }
 
     impl Relation {
-        pub fn new(id: i32, members: Vec<i64, String>, tags: Vec<String, String>) -> Self {
+        pub fn new(id: i32, members: Vec<(i64, String)>, tags: Vec<(String, String)>) -> Self {
             Self { id, members, tags }
+        }
+
+        pub fn build_query (min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
+            format!("relation({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
         }
     }
 }
