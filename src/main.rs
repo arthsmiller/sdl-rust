@@ -19,7 +19,8 @@ pub mod engine {
     use super::sprite::*;
     use super::api::*;
 
-    pub fn run () {
+    #[tokio::main]
+    pub async fn run () {
         let mut sdl_components = SdlComponents::init();
 
         let mut past = sdl_components.timer_subsystem.ticks64();
@@ -39,7 +40,7 @@ pub mod engine {
 
         // todo delete, debug
         let body = Relation::build_query(43.731, 7.418, 43.732, 7.419);
-        post("https://overpass-api.de/api/interpreter", body);
+        let post_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", body));
 
         'running: loop {
             let mut time_elapsed = 0;
@@ -384,7 +385,6 @@ pub mod random {
 pub mod api {
     use reqwest::Error;
 
-    #[tokio::main]
     pub async fn post(uri: &str, body: String) -> Result<(), Error> {
         let client = reqwest::Client::new();
 
