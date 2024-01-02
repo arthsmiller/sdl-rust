@@ -13,11 +13,11 @@ pub mod engine {
     use sdl2::render::WindowCanvas;
     use sdl2::{EventPump, Sdl, TimerSubsystem, VideoSubsystem};
     use sdl2::mouse::MouseButton;
-    use crate::osm::{Node, Relation, Way};
 
     use crate::random::random_int;
     use super::sprite::*;
     use super::api::*;
+    use crate::osm::{Node, Way};
 
     #[tokio::main]
     pub async fn run () {
@@ -39,8 +39,19 @@ pub mod engine {
         }
 
         // todo delete, debug
-        let body = Relation::build_query(43.731, 7.418, 43.732, 7.419);
-        let post_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", body));
+        let node_body = Node::build_query(43.731, 7.418, 43.732, 7.419);
+        println!("{}", node_body);
+        let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
+        let mut node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
+        let mut nodes: Vec<Node> = Node::parse(&node_result);
+        println!("{}", &node_result);
+
+        let way_body = Way::build_query(43.731, 7.418, 43.732, 7.419);
+        println!("{}", way_body);
+        let way_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", way_body));
+        let mut way_result = way_task.await.unwrap().unwrap().text().await.unwrap();
+        let mut ways: Vec<Way> = Way::parse(&way_result);
+        println!("{}", &way_result);
 
         'running: loop {
             let mut time_elapsed = 0;
@@ -383,9 +394,9 @@ pub mod random {
 }
 
 pub mod api {
-    use reqwest::Error;
+    use reqwest::{Error, Response};
 
-    pub async fn post(uri: &str, body: String) -> Result<(), Error> {
+    pub async fn post(uri: &str, body: String) -> Result<Response, Error> {
         let client = reqwest::Client::new();
 
         // https://overpass-api.de/api/interpreter
@@ -397,60 +408,137 @@ pub mod api {
             .send()
             .await?;
 
-        if response.status().is_success() {
-            let response_text = response.text().await?;
-            println!("Received XML Response: {}", response_text);
-        } else {
-            println!("Failed to receive successful response");
-        }
-
-        Ok(())
+        Ok(response)
     }
 }
 
 pub mod osm {
+    use std::collections::HashMap;
+
+    use serde::Deserialize;
+
     pub struct Osm {
-        nodes: Node,
-        ways: Way,
-        relations: Relation,
+        nodes: Vec<Node>,
+        ways: Vec<Way>,
+        relations: Vec<Relation>,
     }
 
     impl Osm {
-        pub fn new(nodes: Node, ways: Way, relations: Relation) -> Self {
+        pub fn new(nodes: Vec<Node>, ways: Vec<Way>, relations: Vec<Relation>) -> Self {
             Self { nodes, ways, relations }
         }
     }
 
+    #[derive(Debug, Deserialize)]
+    pub struct NodeRoot {
+        elements: Vec<Node>
+    }
+
+    #[derive(Debug, Deserialize)]
     pub struct Node {
         id: i64,
         lat: f32,
         lon: f32,
-        tags: Vec<(String, String)>,
+        tags: Option<HashMap<String, String>>,
+        #[serde(rename = "type")]
+        element_type: String,
     }
 
     impl Node {
-        pub fn new(id: i64, lat: f32, lon: f32, tags: Vec<(String, String)>) -> Self {
-            Self { id, lat, lon, tags }
+        pub fn new(id: i64, lat: f32, lon: f32, tags: Option<HashMap<String, String>>, element_type: String) -> Self {
+            Self { id, lat, lon, tags, element_type }
         }
 
         pub fn build_query (min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
-            format!("node({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
+            format!("[out:json]; node({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
+        }
+
+        pub fn parse (string: &str) -> Vec<Node> {
+            let result: NodeRoot = serde_json::from_str(string).unwrap();
+            let mut nodes: Vec<Node> = Vec::new();
+
+            for element in result.elements {
+                let mut tags: Option<HashMap<String, String>> = None;
+                if let Some(mut element_tags) = element.tags {
+                    let mut temp_tags: HashMap<String, String> = HashMap::new();
+                    for (key, value) in element_tags {
+                        temp_tags.insert(key, value);
+                    }
+                    tags = Some(temp_tags);
+                }
+
+                nodes.push(
+                    Node {
+                        id: element.id,
+                        lat: element.lat,
+                        lon: element.lon,
+                        tags,
+                        element_type: "node".to_string(),
+                    }
+                );
+            }
+
+            nodes
         }
     }
 
+    #[derive(Debug, Deserialize)]
+    struct WayRoot {
+        elements: Vec<Way>
+    }
+
+    #[derive(Debug, Deserialize)]
     pub struct Way {
         id: i32,
-        refs: Vec<i64>,
-        tags: Vec<(String, String)>,
+        nodes: Vec<i64>,
+        tags: Option<HashMap<String, String>>,
+        #[serde(rename = "type")]
+        element_type: String,
     }
 
     impl Way {
-        pub fn new(id: i32, refs: Vec<i64>, tags: Vec<(String, String)>) -> Self {
-            Self { id, refs, tags }
+        pub fn new(id: i32, refs: Vec<i64>, tags:Option<HashMap<String, String>>, element_type: String) -> Self {
+            Self { id, nodes: refs, tags, element_type }
         }
 
         pub fn build_query (min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
-            format!("way({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
+            format!("[out:json]; way({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
+        }
+
+        pub fn parse (string: &str) -> Vec<Way> {
+            let result: WayRoot = serde_json::from_str(string).unwrap();
+            let mut ways: Vec<Way> = Vec::new();
+
+            for element in result.elements {
+                let mut nodes: Vec<i64> = Vec::new();
+                if let mut element_nodes = element.nodes {
+                    let mut temp_nodes:  Vec<i64> = Vec::new();
+                    for ref_id in element_nodes {
+                        temp_nodes.push(ref_id);
+                    }
+                    nodes = temp_nodes;
+                }
+
+                let mut tags: Option<HashMap<String, String>> = None;
+                if let Some(mut element_tags) = element.tags {
+                    let mut temp_tags: HashMap<String, String> = HashMap::new();
+                    for (key, value) in element_tags {
+                        temp_tags.insert(key, value);
+                    }
+                    tags = Some(temp_tags);
+                }
+
+                ways.push(
+                    Way {
+                        id: element.id,
+                        nodes,
+                        tags,
+                        element_type: "way".to_string(),
+                    }
+                );
+            }
+
+            ways
         }
     }
 
@@ -466,7 +554,7 @@ pub mod osm {
         }
 
         pub fn build_query (min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
-            format!("relation({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
+            format!("[out:json]; relation({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
         }
     }
 }
