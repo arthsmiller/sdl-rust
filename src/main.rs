@@ -40,19 +40,19 @@ pub mod engine {
         }
 
         // todo delete, debug
-        // let node_body = Node::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
-        // println!("{}", node_body);
-        // let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
-        // let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
-        // println!("{}", &node_result);
-        // let mut nodes_json: HashMap<i64, Node> = Node::parse_json(&node_result);
-        //
-        // let node_body = Node::build_query(OutputFormat::XML, 43.731, 7.418, 43.732, 7.419);
-        // println!("{}", node_body);
-        // let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
-        // let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
-        // println!("{}", &node_result);
-        // let mut nodes_xml: HashMap<i64, Node> = Node::parse_xml(&node_result);
+        let node_body = Node::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
+        println!("{}", node_body);
+        let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
+        let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
+        println!("{}", &node_result);
+        let mut nodes_json: HashMap<i64, Node> = Node::parse_json(&node_result);
+
+        let node_body = Node::build_query(OutputFormat::XML, 43.731, 7.418, 43.732, 7.419);
+        println!("{}", node_body);
+        let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
+        let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
+        println!("{}", &node_result);
+        let mut nodes_xml: HashMap<i64, Node> = Node::parse_xml(&node_result);
 
         let way_body = Way::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
         println!("{}", way_body);
@@ -67,13 +67,20 @@ pub mod engine {
         let way_result = way_task.await.unwrap().unwrap().text().await.unwrap();
         let mut ways_xml: HashMap<i64, Way> = Way::parse_xml(&way_result);
         println!("{}", &way_result);
-        //
-        // let relation_body = Relation::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
-        // println!("{}", relation_body);
-        // let relation_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", relation_body));
-        // let relation_result = relation_task.await.unwrap().unwrap().text().await.unwrap();
-        // println!("{}", &relation_result);
-        // let mut relations: Vec<Relation> = Relation::parse_json(&relation_result);
+
+        let relation_body = Relation::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
+        println!("{}", relation_body);
+        let relation_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", relation_body));
+        let relation_result = relation_task.await.unwrap().unwrap().text().await.unwrap();
+        let mut relations_json: HashMap<i64, Relation> = Relation::parse_json(&relation_result);
+        println!("{}", &relation_result);
+
+        let relation_body = Relation::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
+        println!("{}", relation_body);
+        let relation_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", relation_body));
+        let relation_result = relation_task.await.unwrap().unwrap().text().await.unwrap();
+        let mut relations_xml: HashMap<i64, Relation> = Relation::parse_json(&relation_result);
+        println!("{}", &relation_result);
 
         'running: loop {
             let mut time_elapsed = 0;
@@ -438,6 +445,7 @@ pub mod api {
 
 pub mod osm {
     use std::collections::HashMap;
+    use std::sync::atomic::Ordering::Relaxed;
 
     use serde::Deserialize;
     use serde_xml_rs::from_str;
@@ -695,24 +703,47 @@ pub mod osm {
     }
 
     #[derive(Debug, Deserialize)]
-    struct RelationRoot {
-        elements: Vec<Relation>
+    struct JsonRelationRoot {
+        elements: Vec<JsonRelation>
     }
 
     #[derive(Debug, Deserialize)]
     struct RelationMember {
-        element_type: String,
+        #[serde(rename = "ref")]
         id: i64,
         role: String,
+        #[serde(rename = "type")]
+        element_type: String,
     }
 
     #[derive(Debug, Deserialize)]
-    pub struct Relation {
+    struct JsonRelation {
         id: i64,
-        members: HashMap<i64, (String, String)>,
-        tags: Option<HashMap<String, String>>,
+        members: Vec<RelationMember>,
+        tags: HashMap<String, String>,
         #[serde(rename = "type")]
         element_type: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct XmlRelationRoot {
+        #[serde(rename = "relation")]
+        relations: Vec<XmlRelation>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct XmlRelation {
+        id: i64,
+        #[serde(rename = "member")]
+        members: Vec<RelationMember>,
+        #[serde(rename = "tag")]
+        tags: Vec<XmlTag>,
+    }
+
+    pub struct Relation {
+        ways: HashMap<i64, String>,
+        nodes: HashMap<i64, String>,
+        tags: HashMap<String, String>,
     }
 
     impl Relation {
@@ -720,39 +751,101 @@ pub mod osm {
             format!("[out:{}]; relation({}, {}, {}, {}); out;", get_output_format(output_format), min_lat, min_lon, max_lat, max_lon)
         }
 
-        pub fn parse_json (string: &str) -> Vec<Relation> {
-            let result: RelationRoot = serde_json::from_str(string).unwrap();
-            let mut relations: Vec<Relation> = Vec::new();
+        pub fn parse_json (string: &str) -> HashMap<i64, Relation> {
+            let result: JsonRelationRoot = serde_json::from_str(string).unwrap();
+            let mut deserialized_relations: Vec<JsonRelation> = Vec::new();
+            let mut relations: HashMap<i64, Relation> = HashMap::new();
 
-            let mut members: HashMap<i64, (String, String)> = HashMap::new();
             for element in result.elements {
+                let mut members: Vec<RelationMember> = Vec::new();
                 if let mut element_members = element.members {
-                    let mut temp_members: HashMap<i64, (String, String)> = HashMap::new();
-                    for (ref_id, (member_type, role)) in element_members {
-                        temp_members.insert(ref_id, (member_type, role));
+                    for mut member in element_members {
+                        members.push( RelationMember { id: member.id, element_type: member.element_type, role: member.role } );
                     }
-                    members = temp_members;
                 }
 
-                let mut tags: Option<HashMap<String, String>> = None;
-                if let Some(mut element_tags) = element.tags {
+                let mut tags: HashMap<String, String> = HashMap::new();
+                if let mut element_tags = element.tags {
                     let mut temp_tags: HashMap<String, String> = HashMap::new();
                     for (key, value) in element_tags {
                         temp_tags.insert(key, value);
                     }
-                    tags = Some(temp_tags);
+                    tags = temp_tags;
                 }
 
-                relations.push(
-                    Relation {
+                deserialized_relations.push(
+                    JsonRelation {
                         id: element.id,
-                        members: members.clone(),
+                        members,
                         tags,
                         element_type: "relation".to_string(),
                     }
                 );
             }
 
+            for d_relation in deserialized_relations {
+                let mut ways: HashMap<i64, String> = HashMap::new();
+                let mut nodes: HashMap<i64, String> = HashMap::new();
+                let mut tags: HashMap<String, String> = HashMap::new();
+
+                for member in d_relation.members {
+                    if member.element_type == "node" {
+                        nodes.insert(member.id, member.role);
+                    }
+                    else if member.element_type == "way" {
+                        ways.insert(member.id, member.role);
+                    }
+                }
+
+                for (key, value) in d_relation.tags {
+                    tags.insert(key, value);
+                }
+
+                relations.insert(d_relation.id, Relation { ways, nodes, tags });
+            }
+
+            relations
+        }
+        
+        pub fn parse_xml (string: &str) -> HashMap<i64, Relation> {
+            let result: XmlRelationRoot = serde_xml_rs::from_str(string).unwrap();
+            let mut relations: HashMap<i64, Relation> = HashMap::new();
+            let mut deserialized_relations: Vec<XmlRelation> = Vec::new();
+            
+            for relation in result.relations {
+                let mut members: Vec<RelationMember> = Vec::new();
+                for member in relation.members {
+                    members.push(member);
+                }
+
+                let mut tags: Vec<XmlTag> = Vec::new();
+                for tag in relation.tags {
+                    tags.push(XmlTag { key: tag.key, value: tag.value });
+                }
+
+                deserialized_relations.push(  XmlRelation { id: relation.id, members, tags })
+            }
+
+            for d_relation in deserialized_relations {
+                let mut nodes: HashMap<i64, String> = HashMap::new();
+                let mut ways: HashMap<i64, String> = HashMap::new();
+                for member in d_relation.members {
+                    if member.element_type == "node" {
+                        nodes.insert(member.id, member.role);
+                    }
+                    else if member.element_type == "way" {
+                        ways.insert(member.id, member.role);
+                    }
+                }
+
+                let mut tags: HashMap<String, String> = HashMap::new();
+                for tag in d_relation.tags {
+                    tags.insert(tag.key, tag.value);
+                }
+
+                relations.insert(d_relation.id, Relation { nodes, ways, tags } );
+            }
+            
             relations
         }
     }
