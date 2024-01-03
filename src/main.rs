@@ -12,12 +12,13 @@ pub mod engine {
     use sdl2::rect::Rect;
     use sdl2::render::WindowCanvas;
     use sdl2::{EventPump, Sdl, TimerSubsystem, VideoSubsystem};
+    use sdl2::gfx::primitives::DrawRenderer;
     use sdl2::mouse::MouseButton;
 
     use crate::random::random_int;
     use super::sprite::*;
     use super::api::*;
-    use crate::osm::{Node, Way};
+    use crate::osm::{Node, Way, Relation, OutputFormat};
 
     #[tokio::main]
     pub async fn run () {
@@ -39,19 +40,33 @@ pub mod engine {
         }
 
         // todo delete, debug
-        let node_body = Node::build_query(43.731, 7.418, 43.732, 7.419);
+        let node_body = Node::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
         println!("{}", node_body);
         let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
-        let mut node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
-        let mut nodes: Vec<Node> = Node::parse(&node_result);
+        let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
         println!("{}", &node_result);
+        let mut nodes: HashMap<i64, Node> = Node::parse_json(&node_result);
 
-        let way_body = Way::build_query(43.731, 7.418, 43.732, 7.419);
-        println!("{}", way_body);
-        let way_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", way_body));
-        let mut way_result = way_task.await.unwrap().unwrap().text().await.unwrap();
-        let mut ways: Vec<Way> = Way::parse(&way_result);
-        println!("{}", &way_result);
+        let node_body = Node::build_query(OutputFormat::XML, 43.731, 7.418, 43.732, 7.419);
+        println!("{}", node_body);
+        let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
+        let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
+        println!("{}", &node_result);
+        let mut nodes_xml: HashMap<i64, Node> = Node::parse_xml(&node_result);
+
+        let way_body = Way::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
+        // println!("{}", way_body);
+        // let way_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", way_body));
+        // let way_result = way_task.await.unwrap().unwrap().text().await.unwrap();
+        // let mut ways: Vec<Way> = Way::parse_json(&way_result);
+        // println!("{}", &way_result);
+        //
+        // let relation_body = Relation::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
+        // println!("{}", relation_body);
+        // let relation_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", relation_body));
+        // let relation_result = relation_task.await.unwrap().unwrap().text().await.unwrap();
+        // println!("{}", &relation_result);
+        // let mut relations: Vec<Relation> = Relation::parse_json(&relation_result);
 
         'running: loop {
             let mut time_elapsed = 0;
@@ -76,6 +91,8 @@ pub mod engine {
 
             now = sdl_components.timer_subsystem.ticks64();
             time_elapsed = now - past;
+
+            sdl_components.canvas.line(50, 50, 200, 200, Color::RGB(255, 0, 0));
 
             if time_elapsed >= (1000 / 60) {
                 past = now;
@@ -416,26 +433,15 @@ pub mod osm {
     use std::collections::HashMap;
 
     use serde::Deserialize;
+    use serde_xml_rs::from_str;
 
-    pub struct Osm {
-        nodes: Vec<Node>,
-        ways: Vec<Way>,
-        relations: Vec<Relation>,
-    }
-
-    impl Osm {
-        pub fn new(nodes: Vec<Node>, ways: Vec<Way>, relations: Vec<Relation>) -> Self {
-            Self { nodes, ways, relations }
-        }
+    #[derive(Debug, Deserialize)]
+    struct JsonNodeRoot {
+        elements: Vec<JsonNode>
     }
 
     #[derive(Debug, Deserialize)]
-    pub struct NodeRoot {
-        elements: Vec<Node>
-    }
-
-    #[derive(Debug, Deserialize)]
-    pub struct Node {
+    struct JsonNode {
         id: i64,
         lat: f32,
         lon: f32,
@@ -444,31 +450,57 @@ pub mod osm {
         element_type: String,
     }
 
+    #[derive(Debug, Deserialize)]
+    struct XmlNodeRoot {
+        node: Vec<XmlNode>
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct XmlNode {
+        id: i64,
+        lat: f32,
+        lon: f32,
+        #[serde(rename = "tag", default)]
+        tags: Vec<XmlTag>,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct XmlTag {
+        #[serde(rename = "k")]
+        key: String,
+        #[serde(rename = "v")]
+        value: String,
+    }
+
+    pub struct Node {
+        lat: f32,
+        lon: f32,
+        tags: HashMap<String, String>,
+    }
+
     impl Node {
-        pub fn new(id: i64, lat: f32, lon: f32, tags: Option<HashMap<String, String>>, element_type: String) -> Self {
-            Self { id, lat, lon, tags, element_type }
+        pub fn build_query (output_format: OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
+            format!("[out:{}]; node({}, {}, {}, {}); out;", get_output_format(output_format), min_lat, min_lon, max_lat, max_lon)
         }
 
-        pub fn build_query (min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
-            format!("[out:json]; node({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
-        }
-
-        pub fn parse (string: &str) -> Vec<Node> {
-            let result: NodeRoot = serde_json::from_str(string).unwrap();
-            let mut nodes: Vec<Node> = Vec::new();
+        pub fn parse_json (string: &str) -> HashMap<i64, Node> {
+            let result: JsonNodeRoot = serde_json::from_str(string).unwrap();
+            let mut deserialized_nodes: Vec<JsonNode> = Vec::new();
+            let mut nodes: HashMap<i64, Node> = HashMap::new();
 
             for element in result.elements {
                 let mut tags: Option<HashMap<String, String>> = None;
                 if let Some(mut element_tags) = element.tags {
-                    let mut temp_tags: HashMap<String, String> = HashMap::new();
+                    let mut temp_tag = HashMap::new();
                     for (key, value) in element_tags {
-                        temp_tags.insert(key, value);
+                        temp_tag.insert(key, value);
                     }
-                    tags = Some(temp_tags);
+
+                    tags = Some(temp_tag);
                 }
 
-                nodes.push(
-                    Node {
+                deserialized_nodes.push(
+                    JsonNode {
                         id: element.id,
                         lat: element.lat,
                         lon: element.lon,
@@ -476,6 +508,45 @@ pub mod osm {
                         element_type: "node".to_string(),
                     }
                 );
+            }
+
+            for d_node in deserialized_nodes {
+                nodes.insert(d_node.id, Node { lat: d_node.lat, lon: d_node.lon, tags: d_node.tags.unwrap_or(HashMap::new()) });
+            }
+
+            nodes
+        }
+
+        pub fn parse_xml (string: &str) -> HashMap<i64, Node> {
+            let result: XmlNodeRoot = from_str(string).unwrap();
+            let mut deserialized_nodes: Vec<XmlNode> = Vec::new();
+            let mut nodes: HashMap<i64, Node> = HashMap::new();
+
+            for element in result.node {
+                let mut tags: Vec<XmlTag> = Vec::new();
+                if let mut element_tags = element.tags {
+                    for tag in element_tags {
+                        tags.push(XmlTag { key: tag.key, value: tag.value });
+                    }
+                }
+
+                deserialized_nodes.push(
+                    XmlNode {
+                        id: element.id,
+                        lat: element.lat,
+                        lon: element.lon,
+                        tags,
+                    }
+                );
+            }
+
+            for d_node in deserialized_nodes {
+                let mut tags: HashMap<String, String> = HashMap::new();
+                for tag in d_node.tags {
+                    tags.insert(tag.key, tag.value);
+                }
+
+                nodes.insert(d_node.id, Node { lat: d_node.lat, lon: d_node.lon, tags });
             }
 
             nodes
@@ -497,15 +568,11 @@ pub mod osm {
     }
 
     impl Way {
-        pub fn new(id: i32, refs: Vec<i64>, tags:Option<HashMap<String, String>>, element_type: String) -> Self {
-            Self { id, nodes: refs, tags, element_type }
+        pub fn build_query (output_format: OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
+            format!("[out:{}]; way({}, {}, {}, {}); out;", get_output_format(output_format), min_lat, min_lon, max_lat, max_lon)
         }
 
-        pub fn build_query (min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
-            format!("[out:json]; way({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
-        }
-
-        pub fn parse (string: &str) -> Vec<Way> {
+        pub fn parse_json (string: &str) -> Vec<Way> {
             let result: WayRoot = serde_json::from_str(string).unwrap();
             let mut ways: Vec<Way> = Vec::new();
 
@@ -542,19 +609,78 @@ pub mod osm {
         }
     }
 
+    #[derive(Debug, Deserialize)]
+    struct RelationRoot {
+        elements: Vec<Relation>
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct RelationMember {
+        element_type: String,
+        id: i64,
+        role: String,
+    }
+
+    #[derive(Debug, Deserialize)]
     pub struct Relation {
-        id: i32,
-        members: Vec<(i64, String)>,
-        tags: Vec<(String, String)>,
+        id: i64,
+        members: HashMap<i64, (String, String)>,
+        tags: Option<HashMap<String, String>>,
+        #[serde(rename = "type")]
+        element_type: String,
     }
 
     impl Relation {
-        pub fn new(id: i32, members: Vec<(i64, String)>, tags: Vec<(String, String)>) -> Self {
-            Self { id, members, tags }
+        pub fn build_query (output_format: OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
+            format!("[out:{}]; relation({}, {}, {}, {}); out;", get_output_format(output_format), min_lat, min_lon, max_lat, max_lon)
         }
 
-        pub fn build_query (min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
-            format!("[out:json]; relation({}, {}, {}, {}); out body;", min_lat, min_lon, max_lat, max_lon)
+        pub fn parse_json (string: &str) -> Vec<Relation> {
+            let result: RelationRoot = serde_json::from_str(string).unwrap();
+            let mut relations: Vec<Relation> = Vec::new();
+
+            let mut members: HashMap<i64, (String, String)> = HashMap::new();
+            for element in result.elements {
+                if let mut element_members = element.members {
+                    let mut temp_members: HashMap<i64, (String, String)> = HashMap::new();
+                    for (ref_id, (member_type, role)) in element_members {
+                        temp_members.insert(ref_id, (member_type, role));
+                    }
+                    members = temp_members;
+                }
+
+                let mut tags: Option<HashMap<String, String>> = None;
+                if let Some(mut element_tags) = element.tags {
+                    let mut temp_tags: HashMap<String, String> = HashMap::new();
+                    for (key, value) in element_tags {
+                        temp_tags.insert(key, value);
+                    }
+                    tags = Some(temp_tags);
+                }
+
+                relations.push(
+                    Relation {
+                        id: element.id,
+                        members: members.clone(),
+                        tags,
+                        element_type: "relation".to_string(),
+                    }
+                );
+            }
+
+            relations
+        }
+    }
+
+    pub enum OutputFormat {
+        JSON,
+        XML
+    }
+
+    fn get_output_format (format: OutputFormat) -> String {
+        match format {
+            OutputFormat::JSON => "json".to_string(),
+            OutputFormat::XML => "xml".to_string(),
         }
     }
 }
