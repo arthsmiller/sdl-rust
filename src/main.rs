@@ -40,26 +40,33 @@ pub mod engine {
         }
 
         // todo delete, debug
-        let node_body = Node::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
-        println!("{}", node_body);
-        let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
-        let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
-        println!("{}", &node_result);
-        let mut nodes: HashMap<i64, Node> = Node::parse_json(&node_result);
-
-        let node_body = Node::build_query(OutputFormat::XML, 43.731, 7.418, 43.732, 7.419);
-        println!("{}", node_body);
-        let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
-        let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
-        println!("{}", &node_result);
-        let mut nodes_xml: HashMap<i64, Node> = Node::parse_xml(&node_result);
+        // let node_body = Node::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
+        // println!("{}", node_body);
+        // let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
+        // let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
+        // println!("{}", &node_result);
+        // let mut nodes_json: HashMap<i64, Node> = Node::parse_json(&node_result);
+        //
+        // let node_body = Node::build_query(OutputFormat::XML, 43.731, 7.418, 43.732, 7.419);
+        // println!("{}", node_body);
+        // let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
+        // let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
+        // println!("{}", &node_result);
+        // let mut nodes_xml: HashMap<i64, Node> = Node::parse_xml(&node_result);
 
         let way_body = Way::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
-        // println!("{}", way_body);
-        // let way_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", way_body));
-        // let way_result = way_task.await.unwrap().unwrap().text().await.unwrap();
-        // let mut ways: Vec<Way> = Way::parse_json(&way_result);
-        // println!("{}", &way_result);
+        println!("{}", way_body);
+        let way_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", way_body));
+        let way_result = way_task.await.unwrap().unwrap().text().await.unwrap();
+        let mut ways_json: HashMap<i64, Way> = Way::parse_json(&way_result);
+        println!("{}", &way_result);
+
+        let way_body = Way::build_query(OutputFormat::XML, 43.731, 7.418, 43.732, 7.419);
+        println!("{}", way_body);
+        let way_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", way_body));
+        let way_result = way_task.await.unwrap().unwrap().text().await.unwrap();
+        let mut ways_xml: HashMap<i64, Way> = Way::parse_xml(&way_result);
+        println!("{}", &way_result);
         //
         // let relation_body = Relation::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
         // println!("{}", relation_body);
@@ -554,17 +561,43 @@ pub mod osm {
     }
 
     #[derive(Debug, Deserialize)]
-    struct WayRoot {
-        elements: Vec<Way>
+    struct JsonWayRoot {
+        elements: Vec<JsonWay>
     }
 
     #[derive(Debug, Deserialize)]
-    pub struct Way {
-        id: i32,
+    struct JsonWay {
+        id: i64,
         nodes: Vec<i64>,
         tags: Option<HashMap<String, String>>,
         #[serde(rename = "type")]
         element_type: String,
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct XmlWayRoot {
+        way: Vec<XmlWay>
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct XmlWayNode {
+        #[serde(rename = "ref")]
+        node: i64
+    }
+
+    #[derive(Debug, Deserialize)]
+    struct XmlWay {
+        id: i64,
+        #[serde(rename = "nd")]
+        nodes: Vec<XmlWayNode>,
+        #[serde(rename = "tag", default)]
+        tags: Vec<XmlTag>,
+
+    }
+
+    pub struct Way {
+        nodes: Vec<i64>,
+        tags: HashMap<String, String>
     }
 
     impl Way {
@@ -572,9 +605,10 @@ pub mod osm {
             format!("[out:{}]; way({}, {}, {}, {}); out;", get_output_format(output_format), min_lat, min_lon, max_lat, max_lon)
         }
 
-        pub fn parse_json (string: &str) -> Vec<Way> {
-            let result: WayRoot = serde_json::from_str(string).unwrap();
-            let mut ways: Vec<Way> = Vec::new();
+        pub fn parse_json (string: &str) -> HashMap<i64, Way> {
+            let result: JsonWayRoot = serde_json::from_str(string).unwrap();
+            let mut deserialized_ways: Vec<JsonWay> = Vec::new();
+            let mut ways: HashMap<i64, Way> = HashMap::new();
 
             for element in result.elements {
                 let mut nodes: Vec<i64> = Vec::new();
@@ -595,14 +629,65 @@ pub mod osm {
                     tags = Some(temp_tags);
                 }
 
-                ways.push(
-                    Way {
+                deserialized_ways.push(
+                    JsonWay {
                         id: element.id,
                         nodes,
                         tags,
                         element_type: "way".to_string(),
                     }
                 );
+            }
+
+            for d_way in deserialized_ways {
+                ways.insert(d_way.id, Way { nodes: d_way.nodes, tags: d_way.tags.unwrap_or(HashMap::new()) });
+            }
+
+            ways
+        }
+
+        pub fn parse_xml (string: &str) -> HashMap<i64, Way> {
+            let result: XmlWayRoot = from_str(string).unwrap();
+            let mut deserialized_ways: Vec<XmlWay> = Vec::new();
+            let mut ways: HashMap<i64, Way> = HashMap::new();
+
+            for element in result.way {
+                let mut nodes: Vec<XmlWayNode> = Vec::new();
+                if let mut element_nodes = element.nodes {
+                    let mut temp_nodes:  Vec<XmlWayNode> = Vec::new();
+                    for ref_id in element_nodes {
+                        temp_nodes.push(ref_id);
+                    }
+                    nodes = temp_nodes;
+                }
+
+                let mut tags: Vec<XmlTag> = Vec::new();
+                if let mut element_tags = element.tags {
+                    for tag in element_tags {
+                        tags.push(XmlTag { key: tag.key, value: tag.value });
+                    }
+                }
+
+                deserialized_ways.push(
+                    XmlWay {
+                        id: element.id,
+                        nodes,
+                        tags,
+                    }
+                );
+            }
+
+            for d_way in deserialized_ways {
+                let mut nodes: Vec<i64> = Vec::new();
+                for node in d_way.nodes {
+                    nodes.push(node.node)
+                }
+                let mut tags: HashMap<String, String> = HashMap::new();
+                for tag in d_way.tags {
+                    tags.insert(tag.key, tag.value);
+                }
+
+                ways.insert(d_way.id, Way { nodes, tags });
             }
 
             ways
