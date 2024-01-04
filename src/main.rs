@@ -4,6 +4,7 @@ pub fn main() {
 
 pub mod engine {
     use std::collections::HashMap;
+    use std::error::Error;
     use std::time::Duration;
 
     use sdl2::event::Event;
@@ -17,11 +18,10 @@ pub mod engine {
 
     use crate::random::random_int;
     use super::sprite::*;
-    use super::api::*;
     use crate::osm::{Node, Way, Relation, OutputFormat};
 
     #[tokio::main]
-    pub async fn run () {
+    pub async fn run () -> Result<(), Box<dyn Error>> {
         let mut sdl_components = SdlComponents::init();
 
         let mut past = sdl_components.timer_subsystem.ticks64();
@@ -39,48 +39,36 @@ pub mod engine {
             add_sprite(sprites, SpriteType::ENEMY, &mut sdl_components);
         }
 
-        // todo delete, debug
-        let node_body = Node::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
-        println!("{}", node_body);
-        let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
-        let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
-        println!("{}", &node_result);
-        let mut nodes_json: HashMap<i64, Node> = Node::parse_json(&node_result);
+        let nodes = match Node::get_nodes(OutputFormat::XML, 43.731, 7.418, 43.732, 7.419).await {
+            Ok(nodes) => {
+                nodes
+            }
+            Err(err) => {
+                eprintln!("Error: {:?}", err);
+                return Err(err);
+            }
+        };
 
-        let node_body = Node::build_query(OutputFormat::XML, 43.731, 7.418, 43.732, 7.419);
-        println!("{}", node_body);
-        let node_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", node_body));
-        let node_result = node_task.await.unwrap().unwrap().text().await.unwrap();
-        println!("{}", &node_result);
-        let mut nodes_xml: HashMap<i64, Node> = Node::parse_xml(&node_result);
+        let ways = match Way::get_nodes(OutputFormat::XML, 43.731, 7.418, 43.732, 7.419).await {
+            Ok(ways) => {
+                ways
+            }
+            Err(err) => {
+                eprintln!("Error: {:?}", err);
+                return Err(err);
+            }
+        };
 
-        let way_body = Way::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
-        println!("{}", way_body);
-        let way_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", way_body));
-        let way_result = way_task.await.unwrap().unwrap().text().await.unwrap();
-        let mut ways_json: HashMap<i64, Way> = Way::parse_json(&way_result);
-        println!("{}", &way_result);
-
-        let way_body = Way::build_query(OutputFormat::XML, 43.731, 7.418, 43.732, 7.419);
-        println!("{}", way_body);
-        let way_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", way_body));
-        let way_result = way_task.await.unwrap().unwrap().text().await.unwrap();
-        let mut ways_xml: HashMap<i64, Way> = Way::parse_xml(&way_result);
-        println!("{}", &way_result);
-
-        let relation_body = Relation::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
-        println!("{}", relation_body);
-        let relation_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", relation_body));
-        let relation_result = relation_task.await.unwrap().unwrap().text().await.unwrap();
-        let mut relations_json: HashMap<i64, Relation> = Relation::parse_json(&relation_result);
-        println!("{}", &relation_result);
-
-        let relation_body = Relation::build_query(OutputFormat::JSON, 43.731, 7.418, 43.732, 7.419);
-        println!("{}", relation_body);
-        let relation_task = tokio::spawn(post("https://overpass-api.de/api/interpreter", relation_body));
-        let relation_result = relation_task.await.unwrap().unwrap().text().await.unwrap();
-        let mut relations_xml: HashMap<i64, Relation> = Relation::parse_json(&relation_result);
-        println!("{}", &relation_result);
+        let relations = match Relation::get_nodes(OutputFormat::XML, 43.731, 7.418, 43.732, 7.419).await {
+            Ok(relations) => {
+                relations
+            }
+            Err(err) => {
+                eprintln!("Error: {:?}", err);
+                return Err(err);
+            }
+        };
+        println!("hi");
 
         'running: loop {
             let mut time_elapsed = 0;
@@ -127,6 +115,7 @@ pub mod engine {
             std::thread::sleep(Duration::new(0, 1_000_000_000u32 / 60));
         }
 
+        Ok(())
     }
 
     pub fn add_sprite (sprites: &mut Vec<Sprite>, sprite_type: SpriteType, sdl_components: &mut SdlComponents) {
@@ -176,7 +165,7 @@ pub mod engine {
             }
 
             if input.is_mouse_btn_down(MouseButton::Left) &&
-               input.is_mouse_over_sprite(sprite) == true &&
+               input.mouse_over_sprite(sprite) == true &&
                sprite.sprite_type == SpriteType::ENEMY
             {
                 Sprite::destroy_sprite(sprites, i);
@@ -275,7 +264,7 @@ pub mod engine {
             (self.mouse_last_click_pos_x, self.mouse_last_click_pos_y)
         }
 
-        fn is_mouse_over_sprite (&mut self, sprite: &Sprite) -> bool {
+        fn mouse_over_sprite(&mut self, sprite: &Sprite) -> bool {
             if self.mouse_current_pos_x >= sprite.x && self.mouse_current_pos_x <= sprite.x + 20 &&
                self.mouse_current_pos_y >= sprite.y && self.mouse_current_pos_y <= sprite.y + 20
             {
@@ -425,9 +414,10 @@ pub mod random {
 }
 
 pub mod api {
-    use reqwest::{Error, Response};
+    use reqwest;
+    use std::error::Error;
 
-    pub async fn post(uri: &str, body: String) -> Result<Response, Error> {
+    pub async fn post(uri: &str, body: String) -> Result<String, Box<dyn Error>> {
         let client = reqwest::Client::new();
 
         // https://overpass-api.de/api/interpreter
@@ -439,16 +429,22 @@ pub mod api {
             .send()
             .await?;
 
-        Ok(response)
+        if response.status().is_success() {
+            let response_text = response.text().await?;
+            Ok(response_text)
+        } else {
+            Err("HTTP request failed".into())
+        }
     }
 }
 
 pub mod osm {
     use std::collections::HashMap;
-    use std::sync::atomic::Ordering::Relaxed;
+    use std::error::Error;
 
     use serde::Deserialize;
     use serde_xml_rs::from_str;
+    use crate::api::post;
 
     #[derive(Debug, Deserialize)]
     struct JsonNodeRoot {
@@ -494,11 +490,29 @@ pub mod osm {
     }
 
     impl Node {
-        pub fn build_query (output_format: OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
-            format!("[out:{}]; node({}, {}, {}, {}); out;", get_output_format(output_format), min_lat, min_lon, max_lat, max_lon)
+        pub async fn get_nodes(output_format: OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> Result<HashMap<i64, Node>, Box<dyn Error>> {
+            let body = Node::build_query(&output_format, min_lat, min_lon, max_lat, max_lon);
+            let response_body = match post("https://overpass-api.de/api/interpreter", body).await {
+                Ok(response) => response,
+                Err(err) => {
+                    eprintln!("Error: {:?}", err);
+                    return Err(err);
+                }
+            };
+
+            let result = match output_format {
+                OutputFormat::JSON => Node::parse_json(&response_body),
+                OutputFormat::XML => Node::parse_xml(&response_body),
+            };
+
+            Ok(result)
         }
 
-        pub fn parse_json (string: &str) -> HashMap<i64, Node> {
+        fn build_query (output_format: &OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
+            format!("[out:{}]; node({}, {}, {}, {}); out;", get_output_format(&output_format), min_lat, min_lon, max_lat, max_lon)
+        }
+
+        fn parse_json (string: &str) -> HashMap<i64, Node> {
             let result: JsonNodeRoot = serde_json::from_str(string).unwrap();
             let mut deserialized_nodes: Vec<JsonNode> = Vec::new();
             let mut nodes: HashMap<i64, Node> = HashMap::new();
@@ -532,7 +546,7 @@ pub mod osm {
             nodes
         }
 
-        pub fn parse_xml (string: &str) -> HashMap<i64, Node> {
+        fn parse_xml (string: &str) -> HashMap<i64, Node> {
             let result: XmlNodeRoot = from_str(string).unwrap();
             let mut deserialized_nodes: Vec<XmlNode> = Vec::new();
             let mut nodes: HashMap<i64, Node> = HashMap::new();
@@ -609,11 +623,29 @@ pub mod osm {
     }
 
     impl Way {
-        pub fn build_query (output_format: OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
-            format!("[out:{}]; way({}, {}, {}, {}); out;", get_output_format(output_format), min_lat, min_lon, max_lat, max_lon)
+        pub async fn get_nodes(output_format: OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> Result<HashMap<i64, Way>, Box<dyn Error>> {
+            let body = Way::build_query(&output_format, min_lat, min_lon, max_lat, max_lon);
+            let response_body = match post("https://overpass-api.de/api/interpreter", body).await {
+                Ok(response) => response,
+                Err(err) => {
+                    eprintln!("Error: {:?}", err);
+                    return Err(err);
+                }
+            };
+
+            let result = match output_format {
+                OutputFormat::JSON => Way::parse_json(&response_body),
+                OutputFormat::XML => Way::parse_xml(&response_body),
+            };
+
+            Ok(result)
         }
 
-        pub fn parse_json (string: &str) -> HashMap<i64, Way> {
+        fn build_query (output_format: &OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
+            format!("[out:{}]; way({}, {}, {}, {}); out;", get_output_format(&output_format), min_lat, min_lon, max_lat, max_lon)
+        }
+
+        fn parse_json (string: &str) -> HashMap<i64, Way> {
             let result: JsonWayRoot = serde_json::from_str(string).unwrap();
             let mut deserialized_ways: Vec<JsonWay> = Vec::new();
             let mut ways: HashMap<i64, Way> = HashMap::new();
@@ -654,7 +686,7 @@ pub mod osm {
             ways
         }
 
-        pub fn parse_xml (string: &str) -> HashMap<i64, Way> {
+        fn parse_xml (string: &str) -> HashMap<i64, Way> {
             let result: XmlWayRoot = from_str(string).unwrap();
             let mut deserialized_ways: Vec<XmlWay> = Vec::new();
             let mut ways: HashMap<i64, Way> = HashMap::new();
@@ -747,11 +779,29 @@ pub mod osm {
     }
 
     impl Relation {
-        pub fn build_query (output_format: OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
-            format!("[out:{}]; relation({}, {}, {}, {}); out;", get_output_format(output_format), min_lat, min_lon, max_lat, max_lon)
+        pub async fn get_nodes(output_format: OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> Result<HashMap<i64, Relation>, Box<dyn Error>> {
+            let body = Relation::build_query(&output_format, min_lat, min_lon, max_lat, max_lon);
+            let response_body = match post("https://overpass-api.de/api/interpreter", body).await {
+                Ok(response) => response,
+                Err(err) => {
+                    eprintln!("Error: {:?}", err);
+                    return Err(err);
+                }
+            };
+
+            let result = match output_format {
+                OutputFormat::JSON => Relation::parse_json(&response_body),
+                OutputFormat::XML => Relation::parse_xml(&response_body),
+            };
+
+            Ok(result)
         }
 
-        pub fn parse_json (string: &str) -> HashMap<i64, Relation> {
+        fn build_query (output_format: &OutputFormat, min_lat: f32, min_lon: f32, max_lat: f32, max_lon: f32) -> String {
+            format!("[out:{}]; relation({}, {}, {}, {}); out;", get_output_format(&output_format), min_lat, min_lon, max_lat, max_lon)
+        }
+
+        fn parse_json (string: &str) -> HashMap<i64, Relation> {
             let result: JsonRelationRoot = serde_json::from_str(string).unwrap();
             let mut deserialized_relations: Vec<JsonRelation> = Vec::new();
             let mut relations: HashMap<i64, Relation> = HashMap::new();
@@ -807,7 +857,7 @@ pub mod osm {
             relations
         }
         
-        pub fn parse_xml (string: &str) -> HashMap<i64, Relation> {
+        fn parse_xml (string: &str) -> HashMap<i64, Relation> {
             let result: XmlRelationRoot = serde_xml_rs::from_str(string).unwrap();
             let mut relations: HashMap<i64, Relation> = HashMap::new();
             let mut deserialized_relations: Vec<XmlRelation> = Vec::new();
@@ -855,7 +905,7 @@ pub mod osm {
         XML
     }
 
-    fn get_output_format (format: OutputFormat) -> String {
+    fn get_output_format (format: &OutputFormat) -> String {
         match format {
             OutputFormat::JSON => "json".to_string(),
             OutputFormat::XML => "xml".to_string(),
